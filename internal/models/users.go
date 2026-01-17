@@ -1,0 +1,182 @@
+package models
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/cdriehuys/stuff2/internal/i18n"
+	"github.com/cdriehuys/stuff2/internal/models/queries"
+	"github.com/cdriehuys/stuff2/internal/validation"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+)
+
+type NewUser struct {
+	Email    string
+	Password string
+}
+
+type NewUserErrors struct {
+	Email    validation.Errors
+	Password validation.Errors
+}
+
+func (e NewUserErrors) Error() string {
+	return fmt.Sprintf("%#v", e)
+}
+
+func MakeNewUser(ctx context.Context, email string, password string) (NewUser, error) {
+	t := i18n.FromContext(ctx)
+
+	validationErrors := NewUserErrors{}
+
+	trimmedEmail := strings.TrimSpace(email)
+	if len(trimmedEmail) == 0 {
+		validationErrors.Email.AddNew("required", t.T("user.email.required"))
+	} else if len(trimmedEmail) < 3 || len(trimmedEmail) > 254 || !strings.Contains(trimmedEmail, "@") {
+		validationErrors.Email.AddNew("email", t.T("user.email.invalid"))
+	}
+
+	if len(password) < 8 {
+		validationErrors.Password.AddNew("min", t.C("user.password.length.min", 8, 0, t.FmtNumber(8, 0)))
+	} else if len(password) > 1000 {
+		validationErrors.Password.AddNew("max", t.C("user.password.length.max", 1000, 0, t.FmtNumber(1000, 0)))
+	}
+
+	if validationErrors.Email.HasError() || validationErrors.Password.HasError() {
+		return NewUser{}, validationErrors
+	}
+
+	return NewUser{trimmedEmail, password}, nil
+}
+
+type PasswordHasher interface {
+	Hash(password string) (string, error)
+	ComparePasswordAndHash(password string, hash string) (bool, error)
+}
+
+type TokenGenerator interface {
+	Generate() string
+}
+
+type EmailVerifier interface {
+	DuplicateRegistration(ctx context.Context, email string) error
+	NewEmail(ctx context.Context, email string, token string) error
+}
+
+type UserQueries interface {
+	WithTx(tx queries.DBTX) UserQueries
+
+	InsertEmailVerificationKey(context.Context, queries.InsertEmailVerificationKeyParams) error
+	InsertNewUser(context.Context, queries.InsertNewUserParams) (queries.User, error)
+	VerifiedEmailExists(context.Context, string) (bool, error)
+}
+
+type UserQueriesWrapper struct {
+	*queries.Queries
+}
+
+func (w UserQueriesWrapper) WithTx(tx queries.DBTX) UserQueries {
+	return UserQueriesWrapper{w.Queries.WithTx(tx.(pgx.Tx))}
+}
+
+type UserModel struct {
+	logger         *slog.Logger
+	emailVerifier  EmailVerifier
+	hasher         PasswordHasher
+	tokenGenerator TokenGenerator
+
+	db DB
+	q  UserQueries
+}
+
+func NewUserModel(
+	logger *slog.Logger,
+	emailVerifier EmailVerifier,
+	hasher PasswordHasher,
+	tokenGenerator TokenGenerator,
+	db DB,
+	queries UserQueries,
+) *UserModel {
+	return &UserModel{
+		logger:         logger,
+		emailVerifier:  emailVerifier,
+		hasher:         hasher,
+		tokenGenerator: tokenGenerator,
+		db:             db,
+		q:              queries,
+	}
+}
+
+func (m *UserModel) Register(ctx context.Context, user NewUser) (retErr error) {
+	passwordHash, err := m.hasher.Hash(user.Password)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %v", err)
+	}
+
+	tx, err := m.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %v", err)
+	}
+
+	defer func() {
+		if txErr := tx.Rollback(ctx); txErr != nil && !errors.Is(txErr, pgx.ErrTxClosed) {
+			retErr = errors.Join(retErr, txErr)
+		}
+	}()
+
+	txQueries := m.q.WithTx(tx)
+
+	emailAlreadyVerified, err := txQueries.VerifiedEmailExists(ctx, user.Email)
+	if err != nil {
+		return fmt.Errorf("failed to check for duplicate email: %v", err)
+	}
+
+	if emailAlreadyVerified {
+		m.logger.DebugContext(ctx, "Registration is for an email that has already been verified.")
+
+		// Let the transaction roll back because there are no changes.
+		return m.emailVerifier.DuplicateRegistration(ctx, user.Email)
+	}
+
+	userID := uuid.New()
+
+	userParams := queries.InsertNewUserParams{
+		ID:           userID,
+		Email:        user.Email,
+		PasswordHash: passwordHash,
+	}
+	if _, err := txQueries.InsertNewUser(ctx, userParams); err != nil {
+		return fmt.Errorf("failed to persist new user: %v", err)
+	}
+
+	m.logger.DebugContext(ctx, "Persisted new user.", "userID", userID)
+
+	verificationToken := m.tokenGenerator.Generate()
+
+	emailVerificationParams := queries.InsertEmailVerificationKeyParams{
+		UserID: userID,
+		Email:  user.Email,
+		Token:  verificationToken,
+	}
+	if err := txQueries.InsertEmailVerificationKey(ctx, emailVerificationParams); err != nil {
+		return fmt.Errorf("failed to insert email verification key: %v", err)
+	}
+
+	m.logger.DebugContext(ctx, "Persisted email verification key.", "userID", userID)
+
+	if err := m.emailVerifier.NewEmail(ctx, user.Email, verificationToken); err != nil {
+		return fmt.Errorf("failed to send email verification: %v", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit user registration: %v", err)
+	}
+
+	m.logger.InfoContext(ctx, "Registered a new user.", "userID", userID)
+
+	return nil
+}

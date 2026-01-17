@@ -1,0 +1,5 @@
+# Generated files
+*.gen.go
+
+# Debug binaries
+__debug*

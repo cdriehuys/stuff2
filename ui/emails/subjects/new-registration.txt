@@ -1,0 +1,11 @@
+{{ define "content" }}
+Hello,
+
+Thanks for registering for a Stuff account. Please use the following link to
+confirm your email address:
+
+{{.VerificationLink}}
+
+Thanks,
+The Stuff Team
+{{ end }}

@@ -1,0 +1,13 @@
+{{ define "content" }}
+Hello,
+
+Someone used this email to sign up for a "Stuff" account, but this email is
+already associated with a different account.
+
+If this was you, please log in to your existing account.
+
+If this was not you, you can safely ignore this email.
+
+Thanks,
+The Stuff Team
+{{ end }}

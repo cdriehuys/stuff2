@@ -1,0 +1,75 @@
+package application
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+
+	"github.com/cdriehuys/stuff2/internal/forms"
+	"github.com/cdriehuys/stuff2/internal/i18n"
+	"github.com/cdriehuys/stuff2/internal/models"
+	ut "github.com/go-playground/universal-translator"
+	"github.com/justinas/nosurf"
+)
+
+type TemplateEngine interface {
+	Render(io.Writer, string, any) error
+}
+
+type UserModel interface {
+	Register(context.Context, models.NewUser) error
+}
+
+type TemplateData struct {
+	IsAuthenticated bool
+	CSRFToken       string
+
+	Translator i18n.Translator
+
+	Form forms.Form
+}
+
+type Application struct {
+	Logger *slog.Logger
+
+	Templates  TemplateEngine
+	Translator *ut.UniversalTranslator
+
+	Users UserModel
+}
+
+func (a *Application) templateData(r *http.Request) TemplateData {
+	data := TemplateData{
+		CSRFToken: nosurf.Token(r),
+	}
+
+	if t, ok := r.Context().Value(translatorContextKey).(i18n.Translator); ok {
+		data.Translator = t
+	}
+
+	return data
+}
+
+func (a *Application) serverError(w http.ResponseWriter, r *http.Request, message string, err error, attrs ...any) {
+	attrs = append(attrs, "error", err)
+	a.Logger.ErrorContext(r.Context(), message, attrs...)
+
+	w.WriteHeader(http.StatusInternalServerError)
+
+	// Calling `a.render` would enter an infinite loop if template rendering is panicking. Attempt
+	// the same render process with no error handling instead.
+	data := a.templateData(r)
+	a.Templates.Render(w, "500.html", data)
+}
+
+func (a *Application) render(w http.ResponseWriter, r *http.Request, page string, data TemplateData) {
+	if err := a.Templates.Render(w, page, data); err != nil {
+		a.serverError(w, r, "Failed to render page.", err, "page", page)
+	}
+}
+
+func (a *Application) homeGet(w http.ResponseWriter, r *http.Request) {
+	var data TemplateData = a.templateData(r)
+	a.render(w, r, "home.html", data)
+}

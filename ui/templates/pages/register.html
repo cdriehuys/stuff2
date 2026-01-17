@@ -1,0 +1,42 @@
+{{ define "content" }}
+<h1>Register</h1>
+<form method="post" action="/register">
+  <input type='hidden' name='csrf_token' value='{{ .CSRFToken }}'>
+
+  {{ with .Form.Fields.email }}
+    <label for="email">Email:</label>
+    <input id="email" name="{{ .Name }}" type="email" value="{{ .Value }}">
+    <br>
+    {{ with .Errors }}
+      {{ if gt (len .) 1 }}
+        <ul>
+        {{ range . }}
+          <li>{{ .Message }}</li>
+        {{ end }}
+        </ul>
+      {{ else }}
+        <p>{{ (index . 0).Message}}</p>
+      {{ end }}
+    {{ end }}
+  {{ end }}
+
+  {{ with.Form.Fields.password }}
+    <label for="password">Password:</label>
+    <input id="password" name="{{ .Name }}" type="password" autocomplete="new-password">
+    <br>
+     {{ with .Errors }}
+      {{ if gt (len .) 1 }}
+        <ul>
+        {{ range . }}
+          <li>{{ .Message }}</li>
+        {{ end }}
+        </ul>
+      {{ else }}
+        <p>{{ (index . 0).Message}}</p>
+      {{ end }}
+    {{ end }}
+  {{ end }}
+
+  <button type="submit">Register</button>
+</form>
+{{ end }}

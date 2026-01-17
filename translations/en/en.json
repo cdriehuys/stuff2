@@ -1,0 +1,40 @@
+[
+    {
+        "locale": "en",
+        "key": "user.email.required",
+        "trans": "An email address is required."
+    },
+    {
+        "locale": "en",
+        "key": "user.email.invalid",
+        "trans": "This email address is invalid."
+    },
+    {
+        "locale": "en",
+        "key": "user.password.length.max",
+        "trans": "Password must contain no more than {0} character.",
+        "type": "Cardinal",
+        "rule": "One"
+    },
+    {
+        "locale": "en",
+        "key": "user.password.length.max",
+        "trans": "Password must contain no more than {0} characters.",
+        "type": "Cardinal",
+        "rule": "Other"
+    },
+    {
+        "locale": "en",
+        "key": "user.password.length.min",
+        "trans": "Password must contain at least {0} character.",
+        "type": "Cardinal",
+        "rule": "One"
+    },
+    {
+        "locale": "en",
+        "key": "user.password.length.min",
+        "trans": "Password must contain at least {0} characters.",
+        "type": "Cardinal",
+        "rule": "Other"
+    }
+]
