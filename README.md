@@ -7,7 +7,7 @@ is for this to be a tracker for the random things you own.
 
 - [ ] Basic account management
   - [x] Register
-  - [ ] Verify your email
+  - [x] Verify your email
   - [ ] Log in
 - [ ] Track items you have
 - [ ] Answer useful questions about things you own

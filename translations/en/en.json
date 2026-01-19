@@ -1,6 +1,11 @@
 [
     {
         "locale": "en",
+        "key": "email.verification.key.invalid",
+        "trans": "The provided verification token is invalid. It may have expired, or it may have been used already. Please register again."
+    },
+    {
+        "locale": "en",
         "key": "user.email.required",
         "trans": "An email address is required."
     },

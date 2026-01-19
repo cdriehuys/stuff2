@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/cdriehuys/stuff2/internal/application"
 	"github.com/cdriehuys/stuff2/internal/application/testutils"
 	"github.com/cdriehuys/stuff2/internal/models"
 	"github.com/cdriehuys/stuff2/internal/models/mocks"
-	ut "github.com/go-playground/universal-translator"
+	"github.com/cdriehuys/stuff2/internal/validation"
 )
 
 func TestApplication_registerGet(t *testing.T) {
@@ -132,60 +132,6 @@ func TestApplication_registerPost(t *testing.T) {
 	}
 }
 
-type MockValidationError struct {
-	field string
-	tag   string
-	value any
-}
-
-func (e MockValidationError) Tag() string {
-	return e.tag
-}
-
-func (e MockValidationError) ActualTag() string {
-	return e.tag
-}
-
-func (e MockValidationError) Namespace() string {
-	return ""
-}
-
-func (e MockValidationError) StructNamespace() string {
-	return ""
-}
-
-func (e MockValidationError) Field() string {
-	return e.field
-}
-
-func (e MockValidationError) StructField() string {
-	return e.field
-}
-
-func (e MockValidationError) Value() any {
-	return e.value
-}
-
-func (e MockValidationError) Param() string {
-	return ""
-}
-
-func (e MockValidationError) Kind() reflect.Kind {
-	return reflect.String
-}
-
-func (e MockValidationError) Type() reflect.Type {
-	return nil
-}
-
-func (e MockValidationError) Translate(ut.Translator) string {
-	return ""
-}
-
-func (e MockValidationError) Error() string {
-	return e.tag
-}
-
 func TestApplication_registerPost_ValidationErrors(t *testing.T) {
 	testCases := []struct {
 		name              string
@@ -228,7 +174,7 @@ func TestApplication_registerPost_ValidationErrors(t *testing.T) {
 					t.Fatalf("expected field error for %q, but the field is missing from the form", wantErroredField)
 				}
 
-				if len(field.Errors.Errors()) == 0 {
+				if len(field.Errors) == 0 {
 					t.Errorf("Expected %q to have errors", wantErroredField)
 				}
 			}
@@ -268,5 +214,106 @@ func TestApplication_registerSuccess(t *testing.T) {
 				t.Errorf("Expected status %d, got %d", tt.wantStatus, res.Status)
 			}
 		})
+	}
+}
+
+func TestApplication_verifyEmailGet(t *testing.T) {
+	app := testutils.NewTestApplication(t)
+	ts := testutils.NewTestServer(t, app.Routes())
+	defer ts.Close()
+
+	res := ts.Get(t, "/verify-email/some-token")
+
+	if res.Status != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, res.Status)
+	}
+}
+
+func TestApplication_verifyEmailPost(t *testing.T) {
+	testCases := []struct {
+		name          string
+		templates     CapturingTemplateEngine[application.TemplateData]
+		users         mocks.UserModel
+		token         string
+		wantErrorCode string
+		wantStatus    int
+		wantRedirect  *WantRedirect
+	}{
+		{
+			name: "verification invalid",
+			users: mocks.UserModel{
+				VerifyEmailError: models.ErrInvalidEmailVerificationToken,
+			},
+			token:         "invalid",
+			wantErrorCode: "invalid",
+			wantStatus:    http.StatusBadRequest,
+		},
+		{
+			name: "verification error",
+			users: mocks.UserModel{
+				VerifyEmailError: errors.New("everything broke"),
+			},
+			token:      "valid",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:  "success",
+			token: "valid",
+			wantRedirect: &WantRedirect{
+				Status:   http.StatusSeeOther,
+				Location: "/verify-email-success",
+			},
+		},
+	}
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			app := testutils.NewTestApplication(t)
+
+			app.Templates = &tt.templates
+			app.Users = &tt.users
+
+			ts := testutils.NewTestServer(t, app.Routes())
+			defer ts.Close()
+
+			form := csrfFormValues(t, app, ts, "/verify-email/"+tt.token)
+
+			res := ts.PostForm(t, "/verify-email/"+tt.token, form)
+
+			if tt.wantStatus != 0 && res.Status != tt.wantStatus {
+				t.Errorf("Expected status %d, got %d", tt.wantStatus, res.Status)
+			}
+
+			if tt.wantErrorCode != "" {
+				if !slices.ContainsFunc(tt.templates.RenderedData.Form.Errors, func(e validation.Error) bool { return e.Code() == tt.wantErrorCode }) {
+					t.Errorf("Expected error with code %q, got errors %v", tt.wantErrorCode, tt.templates.RenderedData.Form.Errors)
+				}
+			}
+
+			if got := tt.users.VerifyEmailToken; got != tt.token {
+				t.Errorf("Expected verified token %q, got %q", tt.token, got)
+			}
+
+			if want := tt.wantRedirect; want != nil {
+				if res.Status != want.Status {
+					t.Errorf("Expected status %d, got %d", want.Status, res.Status)
+				}
+
+				if got := res.Headers.Get("Location"); got != want.Location {
+					t.Errorf("Expected redirect location %q, got %q", want.Location, got)
+				}
+			}
+		})
+	}
+}
+
+func TestApplication_verifyEmailSuccess(t *testing.T) {
+	app := testutils.NewTestApplication(t)
+	ts := testutils.NewTestServer(t, app.Routes())
+	defer ts.Close()
+
+	res := ts.Get(t, "/verify-email-success")
+
+	if res.Status != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, res.Status)
 	}
 }

@@ -19,6 +19,7 @@ type TemplateEngine interface {
 
 type UserModel interface {
 	Register(context.Context, models.NewUser) error
+	VerifyEmail(ctx context.Context, token string) error
 }
 
 type TemplateData struct {
@@ -37,6 +38,10 @@ type Application struct {
 	Translator *ut.UniversalTranslator
 
 	Users UserModel
+}
+
+func (a *Application) translator(r *http.Request) i18n.Translator {
+	return i18n.FromContext(r.Context())
 }
 
 func (a *Application) templateData(r *http.Request) TemplateData {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/cdriehuys/stuff2/internal/forms"
 	"github.com/cdriehuys/stuff2/internal/models"
+	"github.com/cdriehuys/stuff2/internal/validation"
 )
 
 func (a *Application) registerGet(w http.ResponseWriter, r *http.Request) {
@@ -61,4 +62,37 @@ func (a *Application) registerPost(w http.ResponseWriter, r *http.Request) {
 
 func (a *Application) registerSuccess(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "register-success.html", a.templateData(r))
+}
+
+func (a *Application) verifyEmailGet(w http.ResponseWriter, r *http.Request) {
+	a.render(w, r, "verify-email.html", a.templateData(r))
+}
+
+func (a *Application) verifyEmailPost(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+
+	if err := a.Users.VerifyEmail(r.Context(), token); err != nil {
+		if errors.Is(err, models.ErrInvalidEmailVerificationToken) {
+			t := a.translator(r)
+			form := forms.Form{
+				Errors: []validation.Error{validation.MakeError("invalid", t.T("email.verification.key.invalid"))},
+			}
+
+			data := a.templateData(r)
+			data.Form = form
+
+			w.WriteHeader(http.StatusBadRequest)
+			a.render(w, r, "verify-email.html", data)
+			return
+		}
+
+		a.serverError(w, r, "Failed to verify email address.", err)
+		return
+	}
+
+	http.Redirect(w, r, "/verify-email-success", http.StatusSeeOther)
+}
+
+func (a *Application) verifyEmailSuccess(w http.ResponseWriter, r *http.Request) {
+	a.render(w, r, "verify-email-success.html", a.templateData(r))
 }

@@ -3,14 +3,14 @@ package forms
 import "github.com/cdriehuys/stuff2/internal/validation"
 
 type Form struct {
-	Errors validation.Errors
+	Errors []validation.Error
 	Fields map[string]Field
 }
 
 type Field struct {
 	Name   string
 	Value  string
-	Errors validation.Errors
+	Errors []validation.Error
 }
 
 type Error struct {

@@ -1,0 +1,26 @@
+{{ define "title" }}Verify Your Email{{ end }}
+
+{{ define "content" }}
+  {{ with .Form.Errors }}
+    <h1>Failed to Verify Email</h1>
+    {{ if gt (len .Errors) 1 }}
+      <ul>
+      {{ range . }}
+        <li>{{ .Message }}</li>
+      {{ end }}
+      </ul>
+    {{ else }}
+      <p>{{ (index .Errors 0).Message}}</p>
+    {{ end }}
+
+    <a href="/register">Register</a>
+  {{ else }}
+    <h1>Verify Your Email</h1>
+    <p>Use the button to verify your email address.</p>
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
+      <button type="submit">Verify</button>
+    </form>
+  {{ end }}
+{{ end }}

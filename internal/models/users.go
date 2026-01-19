@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/cdriehuys/stuff2/internal/i18n"
 	"github.com/cdriehuys/stuff2/internal/models/queries"
@@ -20,8 +21,8 @@ type NewUser struct {
 }
 
 type NewUserErrors struct {
-	Email    validation.Errors
-	Password validation.Errors
+	Email    []validation.Error
+	Password []validation.Error
 }
 
 func (e NewUserErrors) Error() string {
@@ -35,18 +36,18 @@ func MakeNewUser(ctx context.Context, email string, password string) (NewUser, e
 
 	trimmedEmail := strings.TrimSpace(email)
 	if len(trimmedEmail) == 0 {
-		validationErrors.Email.AddNew("required", t.T("user.email.required"))
+		validationErrors.Email = append(validationErrors.Email, validation.MakeError("required", t.T("user.email.required")))
 	} else if len(trimmedEmail) < 3 || len(trimmedEmail) > 254 || !strings.Contains(trimmedEmail, "@") {
-		validationErrors.Email.AddNew("email", t.T("user.email.invalid"))
+		validationErrors.Email = append(validationErrors.Email, validation.MakeError("email", t.T("user.email.invalid")))
 	}
 
 	if len(password) < 8 {
-		validationErrors.Password.AddNew("min", t.C("user.password.length.min", 8, 0, t.FmtNumber(8, 0)))
+		validationErrors.Password = append(validationErrors.Password, validation.MakeError("min", t.C("user.password.length.min", 8, 0, t.FmtNumber(8, 0))))
 	} else if len(password) > 1000 {
-		validationErrors.Password.AddNew("max", t.C("user.password.length.max", 1000, 0, t.FmtNumber(1000, 0)))
+		validationErrors.Password = append(validationErrors.Password, validation.MakeError("max", t.C("user.password.length.max", 1000, 0, t.FmtNumber(1000, 0))))
 	}
 
-	if validationErrors.Email.HasError() || validationErrors.Password.HasError() {
+	if len(validationErrors.Email) > 0 || len(validationErrors.Password) > 0 {
 		return NewUser{}, validationErrors
 	}
 
@@ -70,9 +71,13 @@ type EmailVerifier interface {
 type UserQueries interface {
 	WithTx(tx queries.DBTX) UserQueries
 
+	DeleteEmailVerificationKeyByID(ctx context.Context, id int32) error
+	DeleteUnverifiedEmails(ctx context.Context, email string) error
+	GetEmailVerificationKeyByToken(context.Context, string) (queries.EmailVerificationKey, error)
 	InsertEmailVerificationKey(context.Context, queries.InsertEmailVerificationKeyParams) error
 	InsertNewUser(context.Context, queries.InsertNewUserParams) (queries.User, error)
 	VerifiedEmailExists(context.Context, string) (bool, error)
+	VerifyEmailForUser(ctx context.Context, userID uuid.UUID) error
 }
 
 type UserQueriesWrapper struct {
@@ -88,6 +93,7 @@ type UserModel struct {
 	emailVerifier  EmailVerifier
 	hasher         PasswordHasher
 	tokenGenerator TokenGenerator
+	tokenLifetime  time.Duration
 
 	db DB
 	q  UserQueries
@@ -98,6 +104,7 @@ func NewUserModel(
 	emailVerifier EmailVerifier,
 	hasher PasswordHasher,
 	tokenGenerator TokenGenerator,
+	tokenLifetime time.Duration,
 	db DB,
 	queries UserQueries,
 ) *UserModel {
@@ -106,6 +113,7 @@ func NewUserModel(
 		emailVerifier:  emailVerifier,
 		hasher:         hasher,
 		tokenGenerator: tokenGenerator,
+		tokenLifetime:  tokenLifetime,
 		db:             db,
 		q:              queries,
 	}
@@ -177,6 +185,67 @@ func (m *UserModel) Register(ctx context.Context, user NewUser) (retErr error) {
 	}
 
 	m.logger.InfoContext(ctx, "Registered a new user.", "userID", userID)
+
+	return nil
+}
+
+var ErrInvalidEmailVerificationToken = errors.New("invalid token")
+
+func (m *UserModel) VerifyEmail(ctx context.Context, token string) (retErr error) {
+	// 1. Get token
+	// 2. Check expiration
+	// [in tx]
+	// 3. Mark verified
+	// 4. Delete others
+	// [end tx]
+	// 5. Delete verification
+	verification, err := m.q.GetEmailVerificationKeyByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			m.logger.DebugContext(ctx, "Email verification token does not exist.")
+
+			return ErrInvalidEmailVerificationToken
+		}
+
+		return fmt.Errorf("retrieving verification key: %v", err)
+	}
+
+	if verification.CreatedAt.Time.Add(m.tokenLifetime).Before(time.Now()) {
+		m.logger.DebugContext(ctx, "Email verification token is expired.")
+
+		return ErrInvalidEmailVerificationToken
+	}
+
+	tx, err := m.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %v", err)
+	}
+
+	defer func() {
+		if txErr := tx.Rollback(ctx); txErr != nil && !errors.Is(txErr, pgx.ErrTxClosed) {
+			retErr = errors.Join(retErr, txErr)
+		}
+	}()
+
+	txQueries := m.q.WithTx(tx)
+
+	if err := txQueries.VerifyEmailForUser(ctx, verification.UserID); err != nil {
+		return fmt.Errorf("marking email verified for user %s: %v", verification.UserID.String(), err)
+	}
+
+	if err := txQueries.DeleteUnverifiedEmails(ctx, verification.Email); err != nil {
+		return fmt.Errorf("deleting duplicate unverified users: %v", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing transaction: %v", err)
+	}
+
+	m.logger.InfoContext(ctx, "Verified email address for user.", "userID", verification.UserID)
+
+	if err := m.q.DeleteEmailVerificationKeyByID(ctx, verification.ID); err != nil {
+		return fmt.Errorf("deleting used verification key: %v", err)
+	}
 
 	return nil
 }

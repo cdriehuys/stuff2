@@ -16,6 +16,9 @@ func (a *Application) Routes() http.Handler {
 	mux.Handle("GET /register", dynamic.ThenFunc(a.registerGet))
 	mux.Handle("POST /register", dynamic.ThenFunc(a.registerPost))
 	mux.Handle("GET /register/success", dynamic.ThenFunc(a.registerSuccess))
+	mux.Handle("GET /verify-email/{token}", dynamic.ThenFunc(a.verifyEmailGet))
+	mux.Handle("POST /verify-email/{token}", dynamic.ThenFunc(a.verifyEmailPost))
+	mux.Handle("GET /verify-email-success", dynamic.ThenFunc(a.verifyEmailSuccess))
 
 	// Middleware applied to all requests.
 	standard := alice.New(a.RecoverPanic, a.translatorMiddleware)

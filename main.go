@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/cdriehuys/stuff2/internal/application"
 	"github.com/cdriehuys/stuff2/internal/email"
@@ -20,6 +21,10 @@ import (
 	"github.com/cdriehuys/stuff2/translations"
 	"github.com/cdriehuys/stuff2/ui"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	emailVerificationTokenLifetime time.Duration = 15 * time.Minute
 )
 
 var (
@@ -97,6 +102,7 @@ func main() {
 		emailVerifier,
 		security.Argon2IDHasher{},
 		security.TokenGenerator{},
+		emailVerificationTokenLifetime,
 		models.PoolWrapper{Pool: dbPool},
 		models.UserQueriesWrapper{Queries: queries},
 	)

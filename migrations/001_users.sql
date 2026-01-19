@@ -22,7 +22,7 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE users(
     id uuid PRIMARY KEY,
     email TEXT NOT NULL,
-    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    email_verified_at TIMESTAMPTZ,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -31,7 +31,7 @@ CREATE TABLE users(
 SELECT _manage_updated_at('users');
 
 CREATE UNIQUE INDEX users_email_verified_key ON users(email)
-    WHERE email_verified;
+    WHERE email_verified_at IS NOT NULL;
 
 CREATE TABLE email_verification_keys(
     id INT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
