@@ -20,8 +20,9 @@ func TestLiveLoader_Render(t *testing.T) {
 		name string
 
 		// setup
-		baseTemplate  string
-		pageTemplates map[string]string
+		baseTemplate     string
+		partialTemplates map[string]string
+		pageTemplates    map[string]string
 
 		// parameters
 		page string
@@ -62,6 +63,18 @@ func TestLiveLoader_Render(t *testing.T) {
 			data: map[string]string{"Content": "Refrigerator"},
 			want: "Refrigerator",
 		},
+		{
+			name:         "uses partial",
+			baseTemplate: standardBaseTemplate,
+			partialTemplates: map[string]string{
+				"foo.html": `{{ define "foo" }}Hello from foo.{{ end }}`,
+			},
+			pageTemplates: map[string]string{
+				"page.html": `{{ define "content" }}{{ template "foo" . }}{{ end }}`,
+			},
+			page: "page.html",
+			want: "Hello from foo.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,6 +83,18 @@ func TestLiveLoader_Render(t *testing.T) {
 			if tt.baseTemplate != "" {
 				if err := os.WriteFile(filepath.Join(dir, "base.html"), []byte(tt.baseTemplate), 0o644); err != nil {
 					t.Fatalf("failed to create base.html: %v", err)
+				}
+			}
+
+			if len(tt.partialTemplates) > 0 {
+				if err := os.Mkdir(filepath.Join(dir, "partials"), 0o755); err != nil {
+					t.Fatalf("failed to create partials dir: %v", err)
+				}
+
+				for partial, template := range tt.partialTemplates {
+					if err := os.WriteFile(filepath.Join(dir, "partials", partial), []byte(template), 0o644); err != nil {
+						t.Fatalf("failed to write partial template %q: %v", partial, err)
+					}
 				}
 			}
 

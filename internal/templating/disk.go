@@ -1,6 +1,7 @@
 package templating
 
 import (
+	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
@@ -15,11 +16,25 @@ type LiveLoader struct {
 
 func (l *LiveLoader) Render(w io.Writer, page string, data any) error {
 	basePath := filepath.Join(l.BaseDir, "base.html")
+	partialsPattern := filepath.Join(l.BaseDir, "partials", "*.html")
 	pagePath := filepath.Join(l.BaseDir, "pages", page)
 
-	t, err := template.ParseFiles(basePath, pagePath)
+	files := []string{basePath}
+
+	partials, err := filepath.Glob(partialsPattern)
 	if err != nil {
-		return err
+		return fmt.Errorf("looking for partials: %v", err)
+	}
+
+	if partials != nil {
+		files = append(files, partials...)
+	}
+
+	files = append(files, pagePath)
+
+	t, err := template.ParseFiles(files...)
+	if err != nil {
+		return fmt.Errorf("parsing files for %q: %v", page, err)
 	}
 
 	return t.ExecuteTemplate(w, "main", data)

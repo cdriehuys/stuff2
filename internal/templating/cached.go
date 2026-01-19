@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"path"
 	"path/filepath"
 	texttemplate "text/template"
 )
@@ -18,7 +19,13 @@ type TemplateCache struct {
 
 func NewTemplateCache(logger *slog.Logger, files fs.FS) (*TemplateCache, error) {
 	basePath := "base.html"
+	partialsPattern := path.Join("partials", "*.html")
 	pagesPath := "pages"
+
+	partials, err := fs.Glob(files, partialsPattern)
+	if err != nil {
+		return nil, fmt.Errorf("looking for partials: %v", err)
+	}
 
 	var pages []string
 	visit := func(path string, d fs.DirEntry, err error) error {
@@ -48,7 +55,14 @@ func NewTemplateCache(logger *slog.Logger, files fs.FS) (*TemplateCache, error) 
 			return nil, fmt.Errorf("failed to determine relative path for page %q: %v", page, err)
 		}
 
-		t, err := template.ParseFS(files, basePath, page)
+		// Total number of files is the number of partials plus 2 to account for the base path and
+		// the page itself.
+		patterns := make([]string, 0, len(partials)+2)
+		patterns = append(patterns, basePath)
+		patterns = append(patterns, partials...)
+		patterns = append(patterns, page)
+
+		t, err := template.ParseFS(files, patterns...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to construct template for page %q: %v", page, err)
 		}

@@ -1,0 +1,13 @@
+{{ define "form-errors" }}
+  {{ with . }}
+    {{ if gt (len .) 1 }}
+      <ul>
+      {{ range . }}
+        <li>{{ .Message }}</li>
+      {{ end }}
+      </ul>
+    {{ else }}
+      <p>{{ (index . 0).Message}}</p>
+    {{ end }}
+  {{ end }}
+{{ end }}

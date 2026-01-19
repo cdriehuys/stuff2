@@ -3,15 +3,7 @@
 {{ define "content" }}
   {{ with .Form.Errors }}
     <h1>Failed to Verify Email</h1>
-    {{ if gt (len .Errors) 1 }}
-      <ul>
-      {{ range . }}
-        <li>{{ .Message }}</li>
-      {{ end }}
-      </ul>
-    {{ else }}
-      <p>{{ (index .Errors 0).Message}}</p>
-    {{ end }}
+    {{ template "form-errors" . }}
 
     <a href="/register">Register</a>
   {{ else }}

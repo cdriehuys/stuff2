@@ -21,9 +21,22 @@ var testFS = fstest.MapFS{
 	},
 }
 
+var testFSWithPartial = fstest.MapFS{
+	"base.html": &fstest.MapFile{
+		Data: []byte(`{{ define "main" }}{{ block "content" . }}{{ end }}{{ end }}`),
+	},
+	"partials/partial.html": &fstest.MapFile{
+		Data: []byte(`{{ define "partial" }}I'm a partial!{{ end }}`),
+	},
+	"pages/partial.html": &fstest.MapFile{
+		Data: []byte(`{{ define "content" }}{{ template "partial" . }}{{ end }}`),
+	},
+}
+
 func TestTemplateCache_Render(t *testing.T) {
 	tests := []struct {
 		name string
+		fs   fstest.MapFS
 
 		page string
 		data any
@@ -47,10 +60,21 @@ func TestTemplateCache_Render(t *testing.T) {
 			page:    "missing.html",
 			wantErr: true,
 		},
+		{
+			name: "partials",
+			fs:   testFSWithPartial,
+			page: "partial.html",
+			want: "I'm a partial!",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := templating.NewTemplateCache(slog.New(slog.DiscardHandler), testFS)
+			fs := tt.fs
+			if fs == nil {
+				fs = testFS
+			}
+
+			c, err := templating.NewTemplateCache(slog.New(slog.DiscardHandler), fs)
 			if err != nil {
 				t.Fatalf("could not construct template cache: %v", err)
 			}
