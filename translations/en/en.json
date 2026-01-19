@@ -6,6 +6,11 @@
     },
     {
         "locale": "en",
+        "key": "login.credentials.invalid",
+        "trans": "Either the provided credentials are incorrect, or you have not verified your email address yet."
+    },
+    {
+        "locale": "en",
         "key": "user.email.required",
         "trans": "An email address is required."
     },

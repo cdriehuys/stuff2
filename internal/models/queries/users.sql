@@ -10,6 +10,10 @@ WHERE email = @email AND email_verified_at IS NULL;
 SELECT * FROM email_verification_keys
 WHERE token = @token;
 
+-- name: GetUserByVerifiedEmail :one
+SELECT * FROM users
+WHERE email = @email AND email_verified_at IS NOT NULL;
+
 -- name: InsertEmailVerificationKey :exec
 INSERT INTO email_verification_keys(user_id, email, token)
 VALUES (@user_id, @email, @token);

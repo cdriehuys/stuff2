@@ -54,6 +54,10 @@ func MakeNewUser(ctx context.Context, email string, password string) (NewUser, e
 	return NewUser{trimmedEmail, password}, nil
 }
 
+type User struct {
+	ID uuid.UUID
+}
+
 type PasswordHasher interface {
 	Hash(password string) (string, error)
 	ComparePasswordAndHash(password string, hash string) (bool, error)
@@ -74,6 +78,7 @@ type UserQueries interface {
 	DeleteEmailVerificationKeyByID(ctx context.Context, id int32) error
 	DeleteUnverifiedEmails(ctx context.Context, email string) error
 	GetEmailVerificationKeyByToken(context.Context, string) (queries.EmailVerificationKey, error)
+	GetUserByVerifiedEmail(ctx context.Context, email string) (queries.User, error)
 	InsertEmailVerificationKey(context.Context, queries.InsertEmailVerificationKeyParams) error
 	InsertNewUser(context.Context, queries.InsertNewUserParams) (queries.User, error)
 	VerifiedEmailExists(context.Context, string) (bool, error)
@@ -117,6 +122,41 @@ func NewUserModel(
 		db:             db,
 		q:              queries,
 	}
+}
+
+var ErrInvalidCredentials = errors.New("invalid credentials")
+
+const dummyComparePassword = "jekyll"
+
+// dummyCompareHash is the result of running argon2id.CreateHash("hyde", argon2id.DefaultParams)
+const dummyCompareHash = "$argon2id$v=19$m=65536,t=1,p=8$+6TY8oCAV6WfG6DPgK55Lg$paDhSsjLEhkbUb8YOha73/zxzuC9VJgxCGvKosEtOEQ"
+
+func (m *UserModel) Authenticate(ctx context.Context, email string, password string) (User, error) {
+	user, err := m.q.GetUserByVerifiedEmail(ctx, strings.TrimSpace(email))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Do a password/hash comparison to mitigate timing attacks. The values don't matter as
+			// long as the comparison hash can be decoded as a hash.
+			m.hasher.ComparePasswordAndHash(dummyComparePassword, dummyCompareHash)
+
+			return User{}, ErrInvalidCredentials
+		}
+
+		return User{}, fmt.Errorf("searching for user: %v", err)
+	}
+
+	passwordMatches, err := m.hasher.ComparePasswordAndHash(password, user.PasswordHash)
+	if err != nil {
+		// An error would be returned if a hash is somehow malformed. This is different from a
+		// password that does not match the given hash.
+		return User{}, fmt.Errorf("comparing password to hash: %v", err)
+	}
+
+	if !passwordMatches {
+		return User{}, ErrInvalidCredentials
+	}
+
+	return User{ID: user.ID}, nil
 }
 
 func (m *UserModel) Register(ctx context.Context, user NewUser) (retErr error) {

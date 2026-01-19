@@ -1,8 +1,13 @@
+{{ define "title" }}Log In{{ end }}
+
 {{ define "content" }}
-<h1>Register</h1>
-<p>Already have an account? <a href="/login">Log in</a>.</p>
-<form method="post" action="/register">
+<h1>Log In</h1>
+<p>Don't have an account? <a href="/register">Create one</a>.</p>
+
+<form method="post" action="/login">
   <input type='hidden' name='csrf_token' value='{{ .CSRFToken }}'>
+
+  {{ template "form-errors" .Form.Errors }}
 
   {{ with .Form.Fields.email }}
     <label for="email">Email:</label>
@@ -13,11 +18,11 @@
 
   {{ with.Form.Fields.password }}
     <label for="password">Password:</label>
-    <input id="password" name="{{ .Name }}" type="password" autocomplete="new-password">
+    <input id="password" name="{{ .Name }}" type="password" autocomplete="current-password">
     <br>
      {{ template "form-errors" .Errors }}
   {{ end }}
 
-  <button type="submit">Register</button>
+  <button type="submit">Log In</button>
 </form>
 {{ end }}

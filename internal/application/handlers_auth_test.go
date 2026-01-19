@@ -13,19 +13,8 @@ import (
 	"github.com/cdriehuys/stuff2/internal/models"
 	"github.com/cdriehuys/stuff2/internal/models/mocks"
 	"github.com/cdriehuys/stuff2/internal/validation"
+	"github.com/google/uuid"
 )
-
-func TestApplication_registerGet(t *testing.T) {
-	app := testutils.NewTestApplication(t)
-	ts := testutils.NewTestServer(t, app.Routes())
-	defer ts.Close()
-
-	res := ts.Get(t, "/register")
-
-	if res.Status != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, res.Status)
-	}
-}
 
 type CapturingTemplateEngine[T any] struct {
 	RenderError error
@@ -57,6 +46,118 @@ func (e *CapturingTemplateEngine[T]) Render(w io.Writer, name string, data any) 
 type WantRedirect struct {
 	Status   int
 	Location string
+}
+
+func TestApplication_loginGet(t *testing.T) {
+	app := testutils.NewTestApplication(t)
+	ts := testutils.NewTestServer(t, app.Routes())
+	defer ts.Close()
+
+	res := ts.Get(t, "/login")
+
+	if res.Status != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, res.Status)
+	}
+}
+
+func TestApplication_loginPost(t *testing.T) {
+	defaultUserID := uuid.New()
+
+	testCases := []struct {
+		name         string
+		users        mocks.UserModel
+		templates    CapturingTemplateEngine[application.TemplateData]
+		email        string
+		password     string
+		wantEmail    string
+		wantPassword string
+		wantStatus   int
+		wantRedirect *WantRedirect
+	}{
+		{
+			name: "invalid credentials",
+			users: mocks.UserModel{
+				AuthenticateError: models.ErrInvalidCredentials,
+			},
+			email:        "test@example.com",
+			password:     "bad-password",
+			wantEmail:    "test@example.com",
+			wantPassword: "bad-password",
+			wantStatus:   http.StatusUnauthorized,
+		},
+		{
+			name: "auth error",
+			users: mocks.UserModel{
+				AuthenticateError: errors.New("broken"),
+			},
+			email:        "test@example.com",
+			password:     "bad-password",
+			wantEmail:    "test@example.com",
+			wantPassword: "bad-password",
+			wantStatus:   http.StatusInternalServerError,
+		},
+		{
+			name: "valid credentials",
+			users: mocks.UserModel{
+				AuthenticateUser: models.User{ID: defaultUserID},
+			},
+			wantRedirect: &WantRedirect{
+				Status:   http.StatusSeeOther,
+				Location: "/",
+			},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			app := testutils.NewTestApplication(t)
+			app.Templates = &tt.templates
+			app.Users = &tt.users
+
+			ts := testutils.NewTestServer(t, app.Routes())
+			defer ts.Close()
+
+			form := csrfFormValues(t, app, ts, "/login")
+			form.Add("email", tt.email)
+			form.Add("password", tt.password)
+
+			res := ts.PostForm(t, "/login", form)
+
+			if tt.wantStatus != 0 && tt.wantStatus != res.Status {
+				t.Errorf("Expected status %d, got %d", tt.wantStatus, res.Status)
+			}
+
+			if got := tt.users.AuthenticatedEmail; tt.wantEmail != got {
+				t.Errorf("Expected authenticated email %q, got %q", tt.email, got)
+			}
+
+			if got := tt.users.AuthenticatedPassword; tt.wantPassword != got {
+				t.Errorf("Expected authenticated password %q, got %q", tt.password, got)
+			}
+
+			if want := tt.wantRedirect; want != nil {
+				if res.Status != want.Status {
+					t.Errorf("Expected status %d, got %d", want.Status, res.Status)
+				}
+
+				if got := res.Headers.Get("Location"); got != want.Location {
+					t.Errorf("Expected redirect location %q, got %q", want.Location, got)
+				}
+			}
+		})
+	}
+}
+
+func TestApplication_registerGet(t *testing.T) {
+	app := testutils.NewTestApplication(t)
+	ts := testutils.NewTestServer(t, app.Routes())
+	defer ts.Close()
+
+	res := ts.Get(t, "/register")
+
+	if res.Status != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, res.Status)
+	}
 }
 
 func TestApplication_registerPost(t *testing.T) {

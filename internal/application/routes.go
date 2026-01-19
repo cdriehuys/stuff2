@@ -13,6 +13,8 @@ func (a *Application) Routes() http.Handler {
 	dynamic := alice.New(a.preventCSRF)
 
 	mux.Handle("GET /{$}", dynamic.ThenFunc(a.homeGet))
+	mux.Handle("GET /login", dynamic.ThenFunc(a.loginGet))
+	mux.Handle("POST /login", dynamic.ThenFunc(a.loginPost))
 	mux.Handle("GET /register", dynamic.ThenFunc(a.registerGet))
 	mux.Handle("POST /register", dynamic.ThenFunc(a.registerPost))
 	mux.Handle("GET /register/success", dynamic.ThenFunc(a.registerSuccess))

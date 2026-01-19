@@ -171,16 +171,22 @@ var errInsert = errors.New("insert failed")
 var errRollback = errors.New("rollback failed")
 
 type ConstantHasher struct {
-	HashError    error
-	CompareError error
+	hashError error
+
+	comparedPassword string
+	comparedHash     string
+	compareError     error
 }
 
-func (h ConstantHasher) Hash(string) (string, error) {
-	return mockHashValue, h.HashError
+func (h *ConstantHasher) Hash(string) (string, error) {
+	return mockHashValue, h.hashError
 }
 
-func (h ConstantHasher) ComparePasswordAndHash(password string, hash string) (bool, error) {
-	return password == hash, h.CompareError
+func (h *ConstantHasher) ComparePasswordAndHash(password string, hash string) (bool, error) {
+	h.comparedPassword = password
+	h.comparedHash = hash
+
+	return password == hash, h.compareError
 }
 
 type ConstantTokenGenerator struct {
@@ -221,7 +227,11 @@ type MockUserQueries struct {
 
 	getEmailVerificationKeyByTokenToken  string
 	getEmailVerificationKeyByTokenReturn queries.EmailVerificationKey
-	GetEmailVerificationKeyByTokenError  error
+	getEmailVerificationKeyByTokenError  error
+
+	gotUserByVerifiedEmail      string
+	getUserByVerifiedEmailUser  queries.User
+	getUserByVerifiedEmailError error
 
 	insertEmailVerificationKeyError error
 	insertEmailVerificationParams   queries.InsertEmailVerificationKeyParams
@@ -257,7 +267,13 @@ func (q *MockUserQueries) DeleteUnverifiedEmails(ctx context.Context, email stri
 func (q *MockUserQueries) GetEmailVerificationKeyByToken(ctx context.Context, token string) (queries.EmailVerificationKey, error) {
 	q.getEmailVerificationKeyByTokenToken = token
 
-	return q.getEmailVerificationKeyByTokenReturn, q.GetEmailVerificationKeyByTokenError
+	return q.getEmailVerificationKeyByTokenReturn, q.getEmailVerificationKeyByTokenError
+}
+
+func (q *MockUserQueries) GetUserByVerifiedEmail(ctx context.Context, email string) (queries.User, error) {
+	q.gotUserByVerifiedEmail = email
+
+	return q.getUserByVerifiedEmailUser, q.getUserByVerifiedEmailError
 }
 
 func (q *MockUserQueries) InsertEmailVerificationKey(ctx context.Context, params queries.InsertEmailVerificationKeyParams) error {
@@ -284,6 +300,163 @@ func (q *MockUserQueries) VerifyEmailForUser(ctx context.Context, userID uuid.UU
 	return q.verifyEmailForUserError
 }
 
+func TestUserModel_Authenticate(t *testing.T) {
+	defaultUserID := uuid.New()
+	genericDBError := errors.New("generic DB error")
+
+	testCases := []struct {
+		name                   string
+		queries                MockUserQueries
+		hasher                 ConstantHasher
+		email                  string
+		password               string
+		wantEmail              string
+		wantPasswordComparison bool
+		wantComparedPassword   string
+		wantComparedHash       string
+		wantUser               models.User
+		wantErr                bool
+		wantInvalidCredentials bool
+	}{
+		{
+			name: "error querying for user",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailError: genericDBError,
+			},
+			wantErr: true,
+		},
+		{
+			name: "email not found",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailError: pgx.ErrNoRows,
+			},
+			wantPasswordComparison: true,
+			wantErr:                true,
+			wantInvalidCredentials: true,
+		},
+		{
+			// Note a hash comparison error is different from a mismatched password and hash.
+			name: "hash comparison error",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailUser: queries.User{
+					PasswordHash: "maybe-malformed",
+				},
+			},
+			hasher: ConstantHasher{
+				compareError: errors.New("malformed hash"),
+			},
+			email:                  "exists@example.com",
+			password:               "password",
+			wantEmail:              "exists@example.com",
+			wantPasswordComparison: true,
+			wantComparedPassword:   "password",
+			wantComparedHash:       "maybe-malformed",
+			wantErr:                true,
+		},
+		{
+			name: "user exists invalid credentials",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailUser: queries.User{
+					PasswordHash: "not-password",
+				},
+			},
+			email:                  "exists@example.com",
+			password:               "password",
+			wantEmail:              "exists@example.com",
+			wantPasswordComparison: true,
+			wantComparedPassword:   "password",
+			wantComparedHash:       "not-password",
+			wantErr:                true,
+			wantInvalidCredentials: true,
+		},
+		{
+			name: "valid credentials",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailUser: queries.User{
+					ID:           defaultUserID,
+					PasswordHash: "password",
+				},
+			},
+			email:                  "exists@example.com",
+			password:               "password",
+			wantEmail:              "exists@example.com",
+			wantPasswordComparison: true,
+			wantComparedPassword:   "password",
+			wantComparedHash:       "password",
+			wantUser:               models.User{ID: defaultUserID},
+		},
+		{
+			name: "valid credentials trimmed",
+			queries: MockUserQueries{
+				getUserByVerifiedEmailUser: queries.User{
+					ID:           defaultUserID,
+					PasswordHash: " not trimmed ",
+				},
+			},
+			email:                  " exists@example.com ",
+			password:               " not trimmed ",
+			wantEmail:              "exists@example.com",
+			wantPasswordComparison: true,
+			wantComparedPassword:   " not trimmed ",
+			wantComparedHash:       " not trimmed ",
+			wantUser:               models.User{ID: defaultUserID},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			users := models.NewUserModel(
+				slog.New(slog.DiscardHandler),
+				&MockEmailVerifier{},
+				&tt.hasher,
+				&ConstantTokenGenerator{},
+				time.Minute,
+				&MockDB{},
+				&tt.queries,
+			)
+
+			user, err := users.Authenticate(t.Context(), tt.email, tt.password)
+			if err == nil && tt.wantErr {
+				t.Fatal("Expected `Authenticate` to error.")
+			}
+
+			if err != nil && !tt.wantErr {
+				t.Fatalf("`Authenticate` returned an error: %#v", err)
+			}
+
+			if tt.wantInvalidCredentials != errors.Is(err, models.ErrInvalidCredentials) {
+				if tt.wantInvalidCredentials {
+					t.Errorf("Expected error type `InvalidCredentials`, got %#v", err)
+				} else {
+					t.Errorf("Did not expect `InvalidCredentials` error.")
+				}
+			}
+
+			if got := tt.queries.gotUserByVerifiedEmail; tt.wantEmail != got {
+				t.Errorf("Expected to query user by email %q, got %q", tt.wantEmail, got)
+			}
+
+			if tt.wantPasswordComparison != (tt.hasher.comparedPassword != "" && tt.hasher.comparedHash != "") {
+				if tt.wantPasswordComparison {
+					t.Errorf("Expected hasher to do a password/hash comparison.")
+				} else {
+					t.Errorf("Unexpected password/hash comparison between %q and %q", tt.hasher.comparedPassword, tt.hasher.comparedHash)
+				}
+			}
+
+			if got := tt.hasher.comparedPassword; tt.wantComparedPassword != "" && tt.wantComparedPassword != got {
+				t.Errorf("Expected compared password %q, got %q", tt.wantComparedPassword, got)
+			}
+
+			if got := tt.hasher.comparedHash; tt.wantComparedHash != "" && tt.wantComparedHash != got {
+				t.Errorf("Expected compared hash %q, got %q", tt.wantComparedHash, got)
+			}
+
+			assertUsersEqual(t, tt.wantUser, user)
+		})
+	}
+}
+
 func TestUserModel_Register(t *testing.T) {
 	testCases := []struct {
 		name                             string
@@ -308,7 +481,7 @@ func TestUserModel_Register(t *testing.T) {
 		{
 			name: "hash error",
 			hasher: ConstantHasher{
-				HashError: errors.New("something happened"),
+				hashError: errors.New("something happened"),
 			},
 			newUser: defaultNewUser,
 			wantErr: true,
@@ -571,7 +744,7 @@ func TestUserModel_VerifyEmail(t *testing.T) {
 		{
 			name: "missing token",
 			queries: MockUserQueries{
-				GetEmailVerificationKeyByTokenError: pgx.ErrNoRows,
+				getEmailVerificationKeyByTokenError: pgx.ErrNoRows,
 			},
 			token:      "missing",
 			wantErr:    true,
@@ -580,7 +753,7 @@ func TestUserModel_VerifyEmail(t *testing.T) {
 		{
 			name: "error retrieving token",
 			queries: MockUserQueries{
-				GetEmailVerificationKeyByTokenError: genericDBError,
+				getEmailVerificationKeyByTokenError: genericDBError,
 			},
 			token:      "causes-error",
 			wantErr:    true,
@@ -731,7 +904,7 @@ func TestUserModel_VerifyEmail(t *testing.T) {
 			users := models.NewUserModel(
 				slog.New(slog.DiscardHandler),
 				&MockEmailVerifier{},
-				ConstantHasher{},
+				&ConstantHasher{},
 				&ConstantTokenGenerator{},
 				tt.tokenLifetime,
 				&tt.db,
@@ -780,5 +953,11 @@ func TestUserModel_VerifyEmail(t *testing.T) {
 				t.Errorf("Expected email verification key %d to be deleted, got %d", tt.wantDeletedEmailVerificationID, got)
 			}
 		})
+	}
+}
+
+func assertUsersEqual(t *testing.T, expected models.User, got models.User) {
+	if expected.ID != got.ID {
+		t.Errorf("Expected ID %v, got %v", expected.ID, got.ID)
 	}
 }

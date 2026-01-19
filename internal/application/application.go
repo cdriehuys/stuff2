@@ -18,6 +18,7 @@ type TemplateEngine interface {
 }
 
 type UserModel interface {
+	Authenticate(ctx context.Context, email string, password string) (models.User, error)
 	Register(context.Context, models.NewUser) error
 	VerifyEmail(ctx context.Context, token string) error
 }
