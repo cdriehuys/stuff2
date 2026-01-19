@@ -5,10 +5,10 @@ is for this to be a tracker for the random things you own.
 
 ## Roadmap
 
-- [ ] Basic account management
+- [x] Basic account management
   - [x] Register
   - [x] Verify your email
-  - [ ] Log in
+  - [x] Log in
 - [ ] Track items you have
 - [ ] Answer useful questions about things you own
   - [ ] When did I buy this?

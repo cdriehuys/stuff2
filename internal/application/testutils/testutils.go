@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexedwards/scs/v2"
 	"github.com/cdriehuys/stuff2/internal/application"
 	"github.com/cdriehuys/stuff2/internal/i18n"
 	"github.com/cdriehuys/stuff2/internal/templating"
@@ -22,9 +23,8 @@ import (
 func NewTestApplication(t *testing.T) *application.Application {
 	discardLogger := slog.New(slog.DiscardHandler)
 
-	app := &application.Application{
-		Logger: discardLogger,
-	}
+	sessionManager := scs.New()
+	sessionManager.Cookie.HttpOnly = true
 
 	// Default to using the embedded file system like production.
 	templateFS, err := fs.Sub(ui.FS, "templates")
@@ -32,12 +32,10 @@ func NewTestApplication(t *testing.T) *application.Application {
 		t.Fatalf("failed to load templates from file system: %v", err)
 	}
 
-	templates, err := templating.NewTemplateCache(app.Logger, templateFS)
+	templates, err := templating.NewTemplateCache(discardLogger, templateFS)
 	if err != nil {
 		t.Fatalf("failed to construct template cache: %v", err)
 	}
-
-	app.Templates = templates
 
 	// Load translations
 	ut, err := i18n.LoadTranslations(discardLogger, translations.FS)
@@ -45,9 +43,12 @@ func NewTestApplication(t *testing.T) *application.Application {
 		t.Fatalf("Failed to load translations: %v", err)
 	}
 
-	app.Translator = ut
-
-	return app
+	return &application.Application{
+		Logger:     discardLogger,
+		Session:    sessionManager,
+		Templates:  templates,
+		Translator: ut,
+	}
 }
 
 type TestServer struct {

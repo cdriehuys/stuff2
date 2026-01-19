@@ -64,15 +64,16 @@ func TestApplication_loginPost(t *testing.T) {
 	defaultUserID := uuid.New()
 
 	testCases := []struct {
-		name         string
-		users        mocks.UserModel
-		templates    CapturingTemplateEngine[application.TemplateData]
-		email        string
-		password     string
-		wantEmail    string
-		wantPassword string
-		wantStatus   int
-		wantRedirect *WantRedirect
+		name              string
+		users             mocks.UserModel
+		templates         CapturingTemplateEngine[application.TemplateData]
+		email             string
+		password          string
+		wantEmail         string
+		wantPassword      string
+		wantStatus        int
+		wantRedirect      *WantRedirect
+		wantAuthenticated bool
 	}{
 		{
 			name: "invalid credentials",
@@ -103,8 +104,9 @@ func TestApplication_loginPost(t *testing.T) {
 			},
 			wantRedirect: &WantRedirect{
 				Status:   http.StatusSeeOther,
-				Location: "/",
+				Location: "/app",
 			},
+			wantAuthenticated: true,
 		},
 	}
 
@@ -143,6 +145,16 @@ func TestApplication_loginPost(t *testing.T) {
 				if got := res.Headers.Get("Location"); got != want.Location {
 					t.Errorf("Expected redirect location %q, got %q", want.Location, got)
 				}
+			}
+
+			authRes := ts.Get(t, "/app")
+
+			if tt.wantAuthenticated && authRes.Status != http.StatusOK {
+				t.Errorf("Expected user to be authenticated, but got a %d status for '/app'", authRes.Status)
+			}
+
+			if !tt.wantAuthenticated && authRes.Status == http.StatusOK {
+				t.Errorf("Expected user to not be authenticated, but they were able to retrieve '/app'")
 			}
 		})
 	}

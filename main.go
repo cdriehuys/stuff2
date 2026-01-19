@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/alexedwards/scs/pgxstore"
+	"github.com/alexedwards/scs/v2"
 	"github.com/cdriehuys/stuff2/internal/application"
 	"github.com/cdriehuys/stuff2/internal/email"
 	"github.com/cdriehuys/stuff2/internal/i18n"
@@ -107,8 +109,16 @@ func main() {
 		models.UserQueriesWrapper{Queries: queries},
 	)
 
+	sessionManager := scs.New()
+	sessionManager.Store = pgxstore.New(dbPool)
+
+	sessionManager.Lifetime = 14 * 24 * time.Hour
+
+	sessionManager.Cookie.HttpOnly = true
+
 	app := application.Application{
 		Logger:     logger,
+		Session:    sessionManager,
 		Templates:  uiTemplates,
 		Translator: ut,
 

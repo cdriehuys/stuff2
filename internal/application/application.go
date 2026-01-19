@@ -10,8 +10,15 @@ import (
 	"github.com/cdriehuys/stuff2/internal/i18n"
 	"github.com/cdriehuys/stuff2/internal/models"
 	ut "github.com/go-playground/universal-translator"
+	"github.com/google/uuid"
 	"github.com/justinas/nosurf"
 )
+
+type SessionManager interface {
+	Get(ctx context.Context, key string) any
+	LoadAndSave(http.Handler) http.Handler
+	Put(ctx context.Context, key string, value any)
+}
 
 type TemplateEngine interface {
 	Render(io.Writer, string, any) error
@@ -35,6 +42,7 @@ type TemplateData struct {
 type Application struct {
 	Logger *slog.Logger
 
+	Session    SessionManager
 	Templates  TemplateEngine
 	Translator *ut.UniversalTranslator
 
@@ -78,4 +86,28 @@ func (a *Application) render(w http.ResponseWriter, r *http.Request, page string
 func (a *Application) homeGet(w http.ResponseWriter, r *http.Request) {
 	var data TemplateData = a.templateData(r)
 	a.render(w, r, "home.html", data)
+}
+
+const sessionKeyUserID = "user_id"
+
+func (a *Application) setAuthenticatedUser(r *http.Request, userID uuid.UUID) {
+	a.Session.Put(r.Context(), sessionKeyUserID, userID.String())
+}
+
+func (a *Application) getAuthenticatedUserID(r *http.Request) uuid.UUID {
+	rawID, ok := a.Session.Get(r.Context(), sessionKeyUserID).(string)
+	if !ok {
+		return uuid.Nil
+	}
+
+	id, err := uuid.Parse(rawID)
+	if err != nil {
+		return uuid.Nil
+	}
+
+	return id
+}
+
+func (a *Application) isAuthenticated(r *http.Request) bool {
+	return a.getAuthenticatedUserID(r) != uuid.Nil
 }

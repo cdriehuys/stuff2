@@ -10,7 +10,7 @@ func (a *Application) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Middleware applied to dynamic requests, ie requests that depend on the user who sent them.
-	dynamic := alice.New(a.preventCSRF)
+	dynamic := alice.New(a.Session.LoadAndSave, a.preventCSRF)
 
 	mux.Handle("GET /{$}", dynamic.ThenFunc(a.homeGet))
 	mux.Handle("GET /login", dynamic.ThenFunc(a.loginGet))
@@ -21,6 +21,10 @@ func (a *Application) Routes() http.Handler {
 	mux.Handle("GET /verify-email/{token}", dynamic.ThenFunc(a.verifyEmailGet))
 	mux.Handle("POST /verify-email/{token}", dynamic.ThenFunc(a.verifyEmailPost))
 	mux.Handle("GET /verify-email-success", dynamic.ThenFunc(a.verifyEmailSuccess))
+
+	protected := dynamic.Append(a.RequireAuthenticated)
+
+	mux.Handle("GET /app", protected.ThenFunc(a.authTestRoute))
 
 	// Middleware applied to all requests.
 	standard := alice.New(a.RecoverPanic, a.translatorMiddleware)

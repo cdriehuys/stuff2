@@ -29,7 +29,7 @@ func (a *Application) loginPost(w http.ResponseWriter, r *http.Request) {
 	email := r.PostFormValue("email")
 	password := r.PostFormValue("password")
 
-	_, err := a.Users.Authenticate(r.Context(), email, password)
+	user, err := a.Users.Authenticate(r.Context(), email, password)
 	if err != nil {
 		if errors.Is(err, models.ErrInvalidCredentials) {
 			t := a.translator(r)
@@ -54,7 +54,9 @@ func (a *Application) loginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	a.setAuthenticatedUser(r, user.ID)
+
+	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
 func (a *Application) registerGet(w http.ResponseWriter, r *http.Request) {
@@ -147,3 +149,5 @@ func (a *Application) verifyEmailPost(w http.ResponseWriter, r *http.Request) {
 func (a *Application) verifyEmailSuccess(w http.ResponseWriter, r *http.Request) {
 	a.render(w, r, "verify-email-success.html", a.templateData(r))
 }
+
+func (a *Application) authTestRoute(w http.ResponseWriter, r *http.Request) {}
